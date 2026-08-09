@@ -7,3 +7,7 @@ __pycache__/
 *.pyc
 t.stl
 test_ukuran_base.stl
+frames_*.gv
+frames_*.pdf
+frames_*.gv
+frames_*.pdf
