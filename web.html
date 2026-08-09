@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Robot Path Planner</title>
+<style>
+  :root{
+    --bg: #0d1117;
+    --panel: #151b23;
+    --panel-border: #232b36;
+    --grid-line: #1c2530;
+    --accent: #3fb950;
+    --accent-dim: #1f6f34;
+    --warn: #f0883e;
+    --danger: #f85149;
+    --text: #e6edf3;
+    --text-dim: #7d8590;
+    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    display:flex; height:100vh; overflow:hidden;
+  }
+  #sidebar{
+    width:300px; flex-shrink:0; background:var(--panel);
+    border-right:1px solid var(--panel-border);
+    padding:18px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:18px;
+  }
+  h1{font-size:15px; margin:0 0 2px 0; letter-spacing:0.02em;}
+  .sub{font-size:11px; color:var(--text-dim); margin-bottom:4px;}
+  .section{border-top:1px solid var(--panel-border); padding-top:14px;}
+  .section-title{font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin-bottom:10px;}
+  label{font-size:11px; color:var(--text-dim); display:block; margin-bottom:3px;}
+  input[type=text], input[type=number]{
+    width:100%; background:#0a0e14; border:1px solid var(--panel-border);
+    color:var(--text); padding:6px 8px; border-radius:4px; font-family:var(--mono);
+    font-size:12px; margin-bottom:8px;
+  }
+  input[type=number]{width:70px; display:inline-block;}
+  .row{display:flex; gap:8px; align-items:center;}
+  .row > div{flex:1;}
+  button{
+    background:#1c2530; border:1px solid var(--panel-border); color:var(--text);
+    padding:8px 10px; border-radius:5px; cursor:pointer; font-size:12px;
+    width:100%; margin-bottom:6px; transition:background .12s;
+    font-family:inherit;
+  }
+  button:hover{background:#232e3d;}
+  button.primary{background:var(--accent-dim); border-color:var(--accent); color:#eafff0;}
+  button.primary:hover{background:#256b3a;}
+  button.danger{border-color:#5c2b2b; color:#ffb4ae;}
+  button.danger:hover{background:#3a1f1f;}
+  button.active{outline:2px solid var(--accent);}
+  #status{
+    font-family:var(--mono); font-size:11px; padding:8px 10px; border-radius:5px;
+    background:#0a0e14; border:1px solid var(--panel-border);
+  }
+  #status.connected{color:var(--accent);}
+  #status.disconnected{color:var(--danger);}
+  .dot{display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; background:currentColor;}
+  #canvasWrap{flex:1; position:relative; background:var(--bg);}
+  canvas{display:block; cursor:crosshair;}
+  #hud{
+    position:absolute; top:14px; left:14px; font-family:var(--mono); font-size:11px;
+    color:var(--text-dim); background:rgba(13,17,23,0.75); padding:8px 10px; border-radius:6px;
+    border:1px solid var(--panel-border); pointer-events:none; line-height:1.6;
+  }
+  #hud b{color:var(--text);}
+  #modeTag{
+    position:absolute; top:14px; right:14px; font-family:var(--mono); font-size:11px;
+    padding:6px 12px; border-radius:20px; border:1px solid var(--panel-border);
+    background:rgba(13,17,23,0.75); color:var(--text-dim);
+  }
+  #modeTag.obstacle{color:var(--warn); border-color:#5c4322;}
+  #modeTag.goal{color:var(--accent); border-color:var(--accent-dim);}
+  .waypoint-list{font-family:var(--mono); font-size:11px; max-height:140px; overflow-y:auto;}
+  .waypoint-item{
+    display:flex; justify-content:space-between; padding:4px 6px; border-radius:3px;
+    background:#0a0e14; margin-bottom:3px; color:var(--text-dim);
+  }
+  .waypoint-item.done{color:var(--accent); text-decoration:line-through;}
+  .waypoint-item.current{color:var(--warn); outline:1px solid var(--warn);}
+  small{color:var(--text-dim); font-size:10px; display:block; margin-top:-4px; margin-bottom:8px;}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div>
+    <h1>ROBOT PATH PLANNER</h1>
+    <div class="sub">draw obstacle · klik goal · A* avoid</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Koneksi ROS (rosbridge)</div>
+    <input type="text" id="wsUrl" value="ws://localhost:9090">
+    <button id="btnConnect" class="primary">Connect</button>
+    <div id="status" class="disconnected"><span class="dot"></span>disconnected</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Topic</div>
+    <label>Pose topic (subscribe)</label>
+    <input type="text" id="poseTopic" value="/pose">
+    <label>Goal topic (publish)</label>
+    <input type="text" id="goalTopic" value="/goal_pose">
+    <label>Goal reached topic (subscribe)</label>
+    <input type="text" id="reachedTopic" value="/goal_reached">
+  </div>
+
+  <div class="section">
+    <div class="section-title">Ukuran arena (meter)</div>
+    <div class="row">
+      <div><label>Width (X)</label><input type="number" id="worldW" value="3" step="0.1"></div>
+      <div><label>Height (Y)</label><input type="number" id="worldH" value="3" step="0.1"></div>
+    </div>
+    <label>Grid resolution (m/cell)</label>
+    <input type="number" id="resolution" value="0.05" step="0.01">
+    <label>Robot radius, buat inflate obstacle (m)</label>
+    <input type="number" id="robotRadius" value="0.15" step="0.01">
+    <button id="btnApplyWorld">Terapkan ukuran arena</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Mode</div>
+    <button id="btnModeObstacle">🟧 Draw Obstacle</button>
+    <button id="btnModeGoal">🎯 Set Goal / Plan Path</button>
+    <button id="btnClearObstacles" class="danger">Clear Obstacles</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Path</div>
+    <button id="btnSendPath" class="primary">Send Path ke Robot</button>
+    <button id="btnClearPath" class="danger">Clear Path</button>
+    <small id="pathInfo">belum ada path</small>
+    <div class="waypoint-list" id="waypointList"></div>
+  </div>
+</div>
+
+<div id="canvasWrap">
+  <canvas id="canvas"></canvas>
+  <div id="hud">
+    robot: <b id="hudRobot">x=0.00 y=0.00 yaw=0.0°</b><br>
+    cursor: <b id="hudCursor">-</b>
+  </div>
+  <div id="modeTag">mode: idle</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let ros = null;
+let poseListener = null, goalPublisher = null, reachedListener = null;
+
+let world = { w: 3, h: 3, res: 0.05, robotRadius: 0.15 };
+let grid = null; // occupancy grid: 0=free 1=obstacle(inflated)
+let obstaclesRaw = []; // list of {x,y,w,h} in world meters, unbaked
+let gridW = 0, gridH = 0;
+
+let robot = { x: 0, y: 0, yaw: 0, hasPose: false };
+let mode = 'idle'; // idle | obstacle | goal
+let drawing = false;
+let dragStart = null;
+let dragCurrent = null;
+
+let plannedPath = []; // array of {x,y} world coords (waypoints, simplified)
+let waypointStates = []; // 'pending' | 'current' | 'done'
+let sendingPath = false;
+let currentWaypointIdx = -1;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// ============================================================
+// CANVAS SIZING & COORD TRANSFORM
+// world coords: x right, y up (ROS convention), origin can be anywhere;
+// we map world (0,0)..(w,h) so that world (0,0) sits near bottom-left-ish,
+// but actually let's center world origin in the middle of canvas for intuition.
+// ============================================================
+let pxPerMeter = 100;
+let originPx = { x: 0, y: 0 }; // pixel location of world (0,0)
+
+function resizeCanvas(){
+  const wrap = document.getElementById('canvasWrap');
+  canvas.width = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  computeTransform();
+  render();
+}
+window.addEventListener('resize', resizeCanvas);
+
+function computeTransform(){
+  const margin = 40;
+  const availW = canvas.width - margin*2;
+  const availH = canvas.height - margin*2;
+  pxPerMeter = Math.min(availW / world.w, availH / world.h);
+  // center the world rect in canvas, with world (0,0) at world-center-ish:
+  // we'll treat world x in [-w/2, w/2], y in [-h/2, h/2] as the visible area,
+  // matching a robot that starts near (0,0,0).
+  originPx.x = canvas.width / 2;
+  originPx.y = canvas.height / 2;
+}
+
+function worldToPx(x, y){
+  return {
+    px: originPx.x + x * pxPerMeter,
+    py: originPx.y - y * pxPerMeter // flip y (screen y grows down)
+  };
+}
+function pxToWorld(px, py){
+  return {
+    x: (px - originPx.x) / pxPerMeter,
+    y: -(py - originPx.y) / pxPerMeter
+  };
+}
+
+// ============================================================
+// GRID / OCCUPANCY
+// grid covers world x in [-w/2,w/2], y in [-h/2,h/2]
+// ============================================================
+function rebuildGrid(){
+  gridW = Math.ceil(world.w / world.res);
+  gridH = Math.ceil(world.h / world.res);
+  grid = new Uint8Array(gridW * gridH);
+  const inflateCells = Math.ceil(world.robotRadius / world.res);
+
+  // rasterize each obstacle rect, then inflate
+  const rawGrid = new Uint8Array(gridW * gridH);
+  for(const ob of obstaclesRaw){
+    const x0 = ob.x - world.w/2, y0 = ob.y - world.h/2; // not used, obstacles stored already in centered coords
+  }
+  for(const ob of obstaclesRaw){
+    const gx0 = worldXToGridX(Math.min(ob.x, ob.x+ob.w));
+    const gx1 = worldXToGridX(Math.max(ob.x, ob.x+ob.w));
+    const gy0 = worldYToGridY(Math.max(ob.y, ob.y+ob.h));
+    const gy1 = worldYToGridY(Math.min(ob.y, ob.y+ob.h));
+    for(let gy=Math.max(0,gy0); gy<=Math.min(gridH-1,gy1); gy++){
+      for(let gx=Math.max(0,gx0); gx<=Math.min(gridW-1,gx1); gx++){
+        rawGrid[gy*gridW+gx] = 1;
+      }
+    }
+  }
+  // inflate
+  for(let gy=0; gy<gridH; gy++){
+    for(let gx=0; gx<gridW; gx++){
+      if(rawGrid[gy*gridW+gx]===1){
+        for(let dy=-inflateCells; dy<=inflateCells; dy++){
+          for(let dx=-inflateCells; dx<=inflateCells; dx++){
+            if(dx*dx+dy*dy > inflateCells*inflateCells) continue;
+            const nx=gx+dx, ny=gy+dy;
+            if(nx>=0 && nx<gridW && ny>=0 && ny<gridH) grid[ny*gridW+nx]=1;
+          }
+        }
+      }
+    }
+  }
+}
+function worldXToGridX(x){ return Math.floor((x + world.w/2) / world.res); }
+function worldYToGridY(y){ return Math.floor((world.h/2 - y) / world.res); } // y flipped so grid row 0 = top (+y)
+function gridToWorldX(gx){ return (gx + 0.5) * world.res - world.w/2; }
+function gridToWorldY(gy){ return world.h/2 - (gy + 0.5) * world.res; }
+
+// ============================================================
+// A* PATHFINDING (8-connected)
+// ============================================================
+function planPath(startWorld, goalWorld){
+  const sx = worldXToGridX(startWorld.x), sy = worldYToGridY(startWorld.y);
+  const gx = worldXToGridX(goalWorld.x), gy = worldYToGridY(goalWorld.y);
+
+  if(!inBounds(sx,sy) || !inBounds(gx,gy)) return null;
+  if(grid[gy*gridW+gx]===1) return null; // goal inside obstacle
+
+  const idx = (x,y)=> y*gridW+x;
+  const open = new Map();
+  const gScore = new Float32Array(gridW*gridH).fill(Infinity);
+  const fScore = new Float32Array(gridW*gridH).fill(Infinity);
+  const cameFrom = new Int32Array(gridW*gridH).fill(-1);
+  const closed = new Uint8Array(gridW*gridH);
+
+  gScore[idx(sx,sy)] = 0;
+  fScore[idx(sx,sy)] = heuristic(sx,sy,gx,gy);
+  open.set(idx(sx,sy), true);
+
+  const neighbors8 = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
+
+  let iterations = 0;
+  const maxIter = gridW*gridH*4;
+
+  while(open.size>0){
+    iterations++;
+    if(iterations>maxIter) return null;
+
+    // find lowest fScore in open (simple linear scan; grid kecil jadi ok)
+    let curIdx=-1, curF=Infinity;
+    for(const k of open.keys()){
+      if(fScore[k]<curF){curF=fScore[k]; curIdx=k;}
+    }
+    const cx = curIdx % gridW, cy = Math.floor(curIdx/gridW);
+    if(cx===gx && cy===gy){
+      return reconstructPath(cameFrom, curIdx);
+    }
+    open.delete(curIdx);
+    closed[curIdx]=1;
+
+    for(const [dx,dy,cost] of neighbors8){
+      const nx=cx+dx, ny=cy+dy;
+      if(!inBounds(nx,ny)) continue;
+      const nIdx = idx(nx,ny);
+      if(closed[nIdx]) continue;
+      if(grid[nIdx]===1) continue;
+      // prevent cutting corners diagonally through walls
+      if(dx!==0 && dy!==0){
+        if(grid[idx(cx+dx,cy)]===1 || grid[idx(cx,cy+dy)]===1) continue;
+      }
+      const tentativeG = gScore[curIdx] + cost;
+      if(tentativeG < gScore[nIdx]){
+        cameFrom[nIdx]=curIdx;
+        gScore[nIdx]=tentativeG;
+        fScore[nIdx]=tentativeG + heuristic(nx,ny,gx,gy);
+        open.set(nIdx,true);
+      }
+    }
+  }
+  return null; // no path found
+}
+function inBounds(x,y){ return x>=0 && x<gridW && y>=0 && y<gridH; }
+function heuristic(x1,y1,x2,y2){ return Math.hypot(x2-x1,y2-y1); }
+function reconstructPath(cameFrom, idx){
+  const path=[];
+  let cur=idx;
+  while(cur!==-1){
+    const gx = cur % gridW, gy = Math.floor(cur/gridW);
+    path.push({x:gridToWorldX(gx), y:gridToWorldY(gy)});
+    cur = cameFrom[cur];
+  }
+  path.reverse();
+  return simplifyPath(path);
+}
+// hapus titik yang collinear biar waypoint gak kebanyakan
+function simplifyPath(path){
+  if(path.length<=2) return path;
+  const out=[path[0]];
+  for(let i=1;i<path.length-1;i++){
+    const a=out[out.length-1], b=path[i], c=path[i+1];
+    const cross = (b.x-a.x)*(c.y-a.y) - (b.y-a.y)*(c.x-a.x);
+    if(Math.abs(cross) > 1e-4){
+      out.push(b);
+    }
+  }
+  out.push(path[path.length-1]);
+  return out;
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function render(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // grid lines (every 0.5m)
+  ctx.strokeStyle = getCss('--grid-line');
+  ctx.lineWidth = 1;
+  const step = 0.5;
+  for(let x=-world.w/2; x<=world.w/2+1e-6; x+=step){
+    const p1 = worldToPx(x, -world.h/2), p2 = worldToPx(x, world.h/2);
+    ctx.beginPath(); ctx.moveTo(p1.px,p1.py); ctx.lineTo(p2.px,p2.py); ctx.stroke();
+  }
+  for(let y=-world.h/2; y<=world.h/2+1e-6; y+=step){
+    const p1 = worldToPx(-world.w/2, y), p2 = worldToPx(world.w/2, y);
+    ctx.beginPath(); ctx.moveTo(p1.px,p1.py); ctx.lineTo(p2.px,p2.py); ctx.stroke();
+  }
+
+  // world boundary
+  const tl = worldToPx(-world.w/2, world.h/2);
+  const br = worldToPx(world.w/2, -world.h/2);
+  ctx.strokeStyle = '#3a4452';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(tl.px, tl.py, br.px-tl.px, br.py-tl.py);
+
+  // origin marker
+  const o = worldToPx(0,0);
+  ctx.strokeStyle = '#4a5568'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(o.px-8,o.py); ctx.lineTo(o.px+8,o.py); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(o.px,o.py-8); ctx.lineTo(o.px,o.py+8); ctx.stroke();
+
+  // obstacles
+  ctx.fillStyle = 'rgba(240,136,62,0.35)';
+  ctx.strokeStyle = '#f0883e';
+  ctx.lineWidth = 1.5;
+  for(const ob of obstaclesRaw){
+    const p1 = worldToPx(ob.x, ob.y);
+    const p2 = worldToPx(ob.x+ob.w, ob.y+ob.h);
+    const rx = Math.min(p1.px,p2.px), ry = Math.min(p1.py,p2.py);
+    const rw = Math.abs(p2.px-p1.px), rh = Math.abs(p2.py-p1.py);
+    ctx.fillRect(rx,ry,rw,rh);
+    ctx.strokeRect(rx,ry,rw,rh);
+  }
+
+  // drag preview
+  if(drawing && dragStart && dragCurrent && mode==='obstacle'){
+    const p1 = dragStart, p2 = dragCurrent;
+    const rx=Math.min(p1.px,p2.px), ry=Math.min(p1.py,p2.py);
+    const rw=Math.abs(p2.px-p1.px), rh=Math.abs(p2.py-p1.py);
+    ctx.fillStyle='rgba(240,136,62,0.18)';
+    ctx.strokeStyle='#f0883e';
+    ctx.setLineDash([4,3]);
+    ctx.fillRect(rx,ry,rw,rh); ctx.strokeRect(rx,ry,rw,rh);
+    ctx.setLineDash([]);
+  }
+
+  // planned path
+  if(plannedPath.length>1){
+    ctx.strokeStyle = '#3fb950';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    plannedPath.forEach((wp,i)=>{
+      const p = worldToPx(wp.x,wp.y);
+      if(i===0) ctx.moveTo(p.px,p.py); else ctx.lineTo(p.px,p.py);
+    });
+    ctx.stroke();
+    plannedPath.forEach((wp,i)=>{
+      const p = worldToPx(wp.x,wp.y);
+      ctx.fillStyle = waypointStates[i]==='done' ? '#3fb950' : (waypointStates[i]==='current' ? '#f0883e' : '#7d8590');
+      ctx.beginPath(); ctx.arc(p.px,p.py,4,0,Math.PI*2); ctx.fill();
+    });
+  }
+
+  // robot
+  if(robot.hasPose){
+    const p = worldToPx(robot.x, robot.y);
+    ctx.save();
+    ctx.translate(p.px,p.py);
+    ctx.rotate(-robot.yaw);
+    ctx.fillStyle = '#58a6ff';
+    ctx.strokeStyle = '#a9d1ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(14,0); ctx.lineTo(-8,8); ctx.lineTo(-4,0); ctx.lineTo(-8,-8);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    // radius circle (footprint)
+    ctx.strokeStyle='rgba(88,166,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(p.px,p.py, world.robotRadius*pxPerMeter, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  document.getElementById('hudRobot').textContent =
+    `x=${robot.x.toFixed(2)} y=${robot.y.toFixed(2)} yaw=${(robot.yaw*180/Math.PI).toFixed(1)}°`;
+}
+function getCss(varName){
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+// ============================================================
+// MOUSE INTERACTION
+// ============================================================
+canvas.addEventListener('mousedown', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX-rect.left, py = e.clientY-rect.top;
+  if(mode==='obstacle'){
+    drawing = true;
+    dragStart = {px,py};
+    dragCurrent = {px,py};
+  } else if(mode==='goal'){
+    const w = pxToWorld(px,py);
+    tryPlan(w);
+  }
+});
+canvas.addEventListener('mousemove', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX-rect.left, py = e.clientY-rect.top;
+  const w = pxToWorld(px,py);
+  document.getElementById('hudCursor').textContent = `x=${w.x.toFixed(2)} y=${w.y.toFixed(2)}`;
+  if(drawing){
+    dragCurrent = {px,py};
+    render();
+  }
+});
+canvas.addEventListener('mouseup', (e)=>{
+  if(drawing && mode==='obstacle'){
+    const w1 = pxToWorld(dragStart.px, dragStart.py);
+    const w2 = pxToWorld(dragCurrent.px, dragCurrent.py);
+    const rectW = w2.x-w1.x, rectH = w2.y-w1.y;
+    if(Math.abs(rectW)>0.02 && Math.abs(rectH)>0.02){
+      obstaclesRaw.push({x:w1.x, y:w1.y, w:rectW, h:rectH});
+      rebuildGrid();
+    }
+  }
+  drawing=false; dragStart=null; dragCurrent=null;
+  render();
+});
+
+function tryPlan(goalWorld){
+  if(!robot.hasPose){
+    alert('Belum ada data pose robot. Connect dulu ke rosbridge & pastikan /pose publish.');
+    return;
+  }
+  const path = planPath({x:robot.x,y:robot.y}, goalWorld);
+  if(!path){
+    alert('Path tidak ditemukan (goal di dalam obstacle atau terkurung).');
+    return;
+  }
+  plannedPath = path;
+  waypointStates = path.map(()=> 'pending');
+  currentWaypointIdx = -1;
+  updateWaypointUI();
+  document.getElementById('pathInfo').textContent = `${path.length} waypoint direncanakan`;
+  render();
+}
+
+// ============================================================
+// UI: MODE BUTTONS
+// ============================================================
+document.getElementById('btnModeObstacle').onclick = ()=> setMode('obstacle');
+document.getElementById('btnModeGoal').onclick = ()=> setMode('goal');
+function setMode(m){
+  mode = m;
+  document.getElementById('btnModeObstacle').classList.toggle('active', m==='obstacle');
+  document.getElementById('btnModeGoal').classList.toggle('active', m==='goal');
+  const tag = document.getElementById('modeTag');
+  tag.className = m;
+  tag.textContent = 'mode: ' + (m==='obstacle' ? 'draw obstacle (drag)' : m==='goal' ? 'klik utk set goal' : 'idle');
+}
+
+document.getElementById('btnClearObstacles').onclick = ()=>{
+  obstaclesRaw = [];
+  rebuildGrid();
+  render();
+};
+document.getElementById('btnClearPath').onclick = ()=>{
+  plannedPath = []; waypointStates=[]; currentWaypointIdx=-1;
+  document.getElementById('pathInfo').textContent = 'belum ada path';
+  updateWaypointUI();
+  render();
+};
+
+document.getElementById('btnApplyWorld').onclick = ()=>{
+  world.w = parseFloat(document.getElementById('worldW').value) || 3;
+  world.h = parseFloat(document.getElementById('worldH').value) || 3;
+  world.res = parseFloat(document.getElementById('resolution').value) || 0.05;
+  world.robotRadius = parseFloat(document.getElementById('robotRadius').value) || 0.15;
+  obstaclesRaw = []; // ukuran berubah, reset obstacle biar gak ngaco posisinya
+  rebuildGrid();
+  computeTransform();
+  render();
+};
+
+function updateWaypointUI(){
+  const list = document.getElementById('waypointList');
+  list.innerHTML='';
+  plannedPath.forEach((wp,i)=>{
+    const div = document.createElement('div');
+    div.className = 'waypoint-item ' + waypointStates[i];
+    div.textContent = `#${i} (${wp.x.toFixed(2)}, ${wp.y.toFixed(2)})`;
+    list.appendChild(div);
+  });
+}
+
+// ============================================================
+// ROS CONNECTION
+// ============================================================
+document.getElementById('btnConnect').onclick = ()=>{
+  const url = document.getElementById('wsUrl').value;
+  connectRos(url);
+};
+
+function connectRos(url){
+  if(ros){ ros.close(); }
+  ros = new ROSLIB.Ros({url});
+
+  ros.on('connection', ()=>{
+    setStatus(true);
+    subscribeTopics();
+  });
+  ros.on('error', (e)=>{
+    setStatus(false);
+    console.error('ROS error', e);
+  });
+  ros.on('close', ()=>{
+    setStatus(false);
+  });
+}
+
+function setStatus(connected){
+  const el = document.getElementById('status');
+  el.className = connected ? 'connected' : 'disconnected';
+  el.innerHTML = `<span class="dot"></span>${connected ? 'connected' : 'disconnected'}`;
+}
+
+function subscribeTopics(){
+  const poseTopicName = document.getElementById('poseTopic').value;
+  const reachedTopicName = document.getElementById('reachedTopic').value;
+  const goalTopicName = document.getElementById('goalTopic').value;
+
+  if(poseListener) poseListener.unsubscribe();
+  poseListener = new ROSLIB.Topic({
+    ros, name: poseTopicName, messageType: 'geometry_msgs/PoseStamped'
+  });
+  poseListener.subscribe((msg)=>{
+    robot.x = msg.pose.position.x;
+    robot.y = msg.pose.position.y;
+    robot.yaw = yawFromQuat(msg.pose.orientation);
+    robot.hasPose = true;
+    render();
+  });
+
+  if(reachedListener) reachedListener.unsubscribe();
+  reachedListener = new ROSLIB.Topic({
+    ros, name: reachedTopicName, messageType: 'std_msgs/Bool'
+  });
+  reachedListener.subscribe((msg)=>{
+    if(msg.data && sendingPath){
+      onWaypointReached();
+    }
+  });
+
+  goalPublisher = new ROSLIB.Topic({
+    ros, name: goalTopicName, messageType: 'geometry_msgs/PoseStamped'
+  });
+}
+
+function yawFromQuat(q){
+  const siny_cosp = 2*(q.w*q.z + q.x*q.y);
+  const cosy_cosp = 1-2*(q.y*q.y + q.z*q.z);
+  return Math.atan2(siny_cosp, cosy_cosp);
+}
+function yawToQuat(yaw){
+  return { x:0, y:0, z:Math.sin(yaw/2), w:Math.cos(yaw/2) };
+}
+
+// ============================================================
+// SEND PATH SEQUENTIALLY (nunggu /goal_reached tiap waypoint)
+// ============================================================
+document.getElementById('btnSendPath').onclick = ()=>{
+  if(!goalPublisher){ alert('Belum connect ke rosbridge.'); return; }
+  if(plannedPath.length===0){ alert('Belum ada path. Set goal dulu di mode "Set Goal".'); return; }
+  sendingPath = true;
+  currentWaypointIdx = -1;
+  waypointStates = plannedPath.map(()=> 'pending');
+  onWaypointReached(); // trigger pengiriman waypoint pertama
+};
+
+function onWaypointReached(){
+  if(currentWaypointIdx>=0 && currentWaypointIdx<waypointStates.length){
+    waypointStates[currentWaypointIdx]='done';
+  }
+  currentWaypointIdx++;
+  if(currentWaypointIdx >= plannedPath.length){
+    sendingPath = false;
+    document.getElementById('pathInfo').textContent = 'Path selesai ✔';
+    updateWaypointUI();
+    render();
+    return;
+  }
+  waypointStates[currentWaypointIdx]='current';
+  const wp = plannedPath[currentWaypointIdx];
+  // yaw target: arahin ke waypoint berikutnya (kalau ada), kalau titik terakhir, pakai yaw sebelumnya
+  let yawTarget = robot.yaw;
+  if(currentWaypointIdx < plannedPath.length-1){
+    const next = plannedPath[currentWaypointIdx+1];
+    yawTarget = Math.atan2(next.y-wp.y, next.x-wp.x);
+  }
+  const q = yawToQuat(yawTarget);
+  const msg = new ROSLIB.Message({
+    header: { frame_id: 'map' },
+    pose: {
+      position: {x: wp.x, y: wp.y, z: 0},
+      orientation: q
+    }
+  });
+  goalPublisher.publish(msg);
+  document.getElementById('pathInfo').textContent =
+    `Mengirim waypoint ${currentWaypointIdx+1}/${plannedPath.length}...`;
+  updateWaypointUI();
+  render();
+}
+
+// ============================================================
+// INIT
+// ============================================================
+setMode('idle');
+resizeCanvas();
+rebuildGrid();
+</script>
+</body>
+</html>

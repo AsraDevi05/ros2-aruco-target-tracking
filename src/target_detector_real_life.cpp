@@ -1,0 +1,1 @@
+[paste kode di atas]

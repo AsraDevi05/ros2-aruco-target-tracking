@@ -1,0 +1,9 @@
+build/
+install/
+log/
+.vscode/
+*.zip
+__pycache__/
+*.pyc
+t.stl
+test_ukuran_base.stl

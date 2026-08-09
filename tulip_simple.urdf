@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<robot name="tulip_robot">
+  <link name="odom"/>
+  <link name="chassis">
+    <visual><geometry><box size="0.3 0.2 0.1"/></geometry><material name="blue"><color rgba="0.2 0.2 0.8 1"/></material></visual>
+    <inertial><mass value="5.0"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.06" iyz="0" izz="0.08"/></inertial>
+  </link>
+  <link name="left_wheel">
+    <visual><geometry><cylinder radius="0.078" length="0.05"/></geometry><material name="black"><color rgba="0.1 0.1 0.1 1"/></material></visual>
+    <inertial><mass value="0.5"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.002"/></inertial>
+  </link>
+  <link name="right_wheel">
+    <visual><geometry><cylinder radius="0.078" length="0.05"/></geometry><material name="black"><color rgba="0.1 0.1 0.1 1"/></material></visual>
+    <inertial><mass value="0.5"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.002"/></inertial>
+  </link>
+  <link name="camera_link">
+    <visual><geometry><box size="0.05 0.05 0.05"/></geometry><material name="yellow"><color rgba="1.0 0.8 0.0 1"/></material></visual>
+    <inertial><mass value="0.1"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial>
+  </link>
+  <joint name="odom_to_chassis" type="fixed">
+    <parent link="odom"/><child link="chassis"/><origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="chassis"/><child link="left_wheel"/><origin xyz="0 0.15 -0.0445" rpy="-1.5707 0 0"/><axis xyz="0 0 1"/>
+  </joint>
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="chassis"/><child link="right_wheel"/><origin xyz="0 -0.15 -0.0445" rpy="-1.5707 0 0"/><axis xyz="0 0 1"/>
+  </joint>
+  <joint name="camera_joint" type="fixed">
+    <parent link="chassis"/><child link="camera_link"/><origin xyz="0.1 0 0.05" rpy="0 0 0"/>
+  </joint>
+  <gazebo>
+  <plugin filename="gz-sim-diff-drive-system"
+          name="gz::sim::systems::DiffDrive">
+    <left_joint>left_wheel_joint</left_joint>
+    <right_joint>right_wheel_joint</right_joint>
+    <wheel_separation>0.2</wheel_separation>
+    <wheel_radius>0.05</wheel_radius>
+    <topic>/cmd_vel</topic>
+    <odom_topic>/odom</odom_topic>
+    <frame_id>odom</frame_id>
+    <child_frame_id>base_link</child_frame_id>
+  </plugin>
+</gazebo>
+</robot>
